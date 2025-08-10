@@ -1,0 +1,89 @@
+/* styles.css 或 App.css 或 index.css */
+
+/* 确保 heatmap 容器有足够空间 */
+.heatmap-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* 关键：给容器一个明确的高度，否则子元素高度可能为0 */
+    height: 80%; /* 或者使用具体的像素值，如 400px */
+    overflow-y: auto; /* 如果块太多，允许滚动 */
+    gap: 2px; /* 块之间的间距 */
+    padding: 5px 0; /* 容器内边距 */
+}
+
+/* 定义热力图块的基本样式 */
+.heatmap-block {
+    /* 关键：必须给块指定宽度和高度 */
+    width: 16px; /* 调整为你想要的宽度 */
+    height: 16px; /* 调整为你想要的高度 */
+    border-radius: 3px; /* 可选：圆角 */
+    /* border: 1px solid #ddd; */ /* 可选：边框，有助于在调试时看到块 */
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.1s ease; /* 可选：悬停效果 */
+}
+
+/* 可选：热力图块悬停效果 */
+.heatmap-block:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
+}
+
+/* 可选：确保 WritingView 中间区域的布局合理 */
+/* 如果 .w-[5%] 的 div 没有明确的高度，也可能影响内部布局 */
+.writing-view-center-column { /* 你可以给中间的 div 加上这个类名 */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around; /* 或 space-between */
+    align-items: center;
+    height: 100%; /* 确保它占满父容器高度 */
+    padding: 10px 0; /* 上下内边距 */
+    box-sizing: border-box;
+}
+
+/* DraggableModal 的样式 (如果之前没有) */
+.modal-header {
+    user-select: none; /* 防止拖拽时选中文本 */
+}
+.toolbar-separator {
+    width: 1px;
+    height: 24px;
+    background-color: #ccc;
+    margin: 0 4px;
+}
+.toolbar-btn {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.toolbar-btn:hover {
+    background-color: #e5e5e5;
+    border-color: #ccc;
+}
+.bubble-input {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+.goal-bubble {
+    padding: 2px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.goal-bubble:hover {
+    background-color: #f0f0f0;
+}
+.goal-bubble:focus {
+    outline: 2px solid #007bff;
+    outline-offset: 1px;
+}
+/* 确保 Tailwind CSS 的基础样式没有被覆盖 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
