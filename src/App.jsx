@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
-// --- IMPORTANT: PASTE YOUR API KEY HERE ---
-// This key will be visible in your browser's code. This is okay for development,
-// but DO NOT deploy this to a public website.
+
 const GEMINI_API_KEY = "AIzaSyBsinouJnEwskZjSDOOY3H0XbchmjxMV8k";
 
-// --- All logic is now in the frontend ---
+
 
 // 1. Prompts are defined in the frontend. "review" is now an array for sternness levels.
 const prompts = {
