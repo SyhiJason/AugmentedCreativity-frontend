@@ -1,4 +1,13 @@
-/* styles.css 或 App.css 或 index.css */
+@import "tailwindcss";
+@plugin "daisyui";
+
+html {
+    font-size: 16px; /* 1rem = 16px */
+}
+
+body {
+    font-size: 1rem;   /* = 16px */
+}
 
 /* 确保 heatmap 容器有足够空间 */
 .heatmap-container {
@@ -83,7 +92,3 @@
     outline: 2px solid #007bff;
     outline-offset: 1px;
 }
-/* 确保 Tailwind CSS 的基础样式没有被覆盖 */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;

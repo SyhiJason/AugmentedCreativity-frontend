@@ -61,7 +61,11 @@ export default class GeminiApi {
                     return JSON.stringify({error: `API responded with status ${res.status}`});
                 }
                 const data = await res.json();
-                return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? JSON.stringify({error: 'No content returned from API.'});
+                const message = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (message) {
+                    return message;
+                }
+                return JSON.stringify({error: 'No content returned from API.'});
             } catch (e) {
                 console.error('Error calling Google API:', e);
                 retries--;

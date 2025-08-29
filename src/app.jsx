@@ -67,31 +67,59 @@ export default function App() {
             }
         });
     }, []);
+
+    useEffect(() => {
+        console.log(initialData)
+    }, [initialData])
     
     const handleConfirmGoal = () => {
         logEvent('goal_setting_confirmed');
         setView('writing');
+
     }
 
     if (isLoading) {
-        return <div className="flex items-center justify-center h-screen bg-slate-100 text-slate-700">Loading...</div>;
+        return (
+            <div className="flex items-center justify-center h-screen bg-slate-100 text-slate-700">
+                <div className={"flex flex-row gap-2 items-center"}>
+                    <div>
+                        <span className="loading loading-spinner loading-md"></span>
+                    </div>
+                    <div>
+                        Loading...
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     return (
-        <div className="bg-slate-100 overflow-hidden">
-            {view === 'goalSetting' ? (
-                <GoalSettingView
-                    goalStructure={initialData.goalStructure}
-                    setGoalStructure={(gs) => setInitialData(p => ({ ...p, goalStructure: gs }))}
-                    onConfirm={handleConfirmGoal}
-                />
-            ) : (
-                <WritingComponent
-                    firebase={firebase}
-                    initialData={initialData}
-                    logEvent={logEvent}
-                />
-            )}
+        <div className="w-screen h-screen">
+            <div className={"p-4 w-full h-full"}>
+                <div className={"border-1 border-gray-300 rounded overflow-hidden  w-full h-full"}>
+                    {view === 'goalSetting' ? (
+                        <GoalSettingView
+                            goalStructure={initialData.goalStructure}
+                            setGoalStructure={(updater) =>
+                                setInitialData(p => {
+                                    const gs =
+                                        typeof updater === "function"
+                                            ? updater(p.goalStructure) // 传函数时调用
+                                            : updater;                 // 传对象时直接替换
+                                    return { ...p, goalStructure: gs };
+                                })
+                            }
+                            onConfirm={handleConfirmGoal}
+                        />
+                    ) : (
+                        <WritingComponent
+                            firebase={firebase}
+                            initialData={initialData}
+                            logEvent={logEvent}
+                        />
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
