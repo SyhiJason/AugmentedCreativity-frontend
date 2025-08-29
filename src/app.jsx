@@ -67,10 +67,6 @@ export default function App() {
             }
         });
     }, []);
-
-    useEffect(() => {
-        console.log(initialData)
-    }, [initialData])
     
     const handleConfirmGoal = () => {
         logEvent('goal_setting_confirmed');
