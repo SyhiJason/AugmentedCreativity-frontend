@@ -237,15 +237,15 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
                             {(goalStructure.paper_outline || []).map((section, si) => (
                                 <div key={si}>
                                     <h3 className="font-bold text-lg text-slate-800 mb-3 border-b border-slate-200 pb-2 mt-6">{section.section_name}</h3>
-                                    <GoalBlueprintEditableBubbleComponent path={`paper_outline.${si}.objective`} text={section.objective} onUpdate={onBubbleUpdate} extraClasses="text-base font-semibold block w-full mb-4 !text-blue-800 !bg-blue-100" />
+                                    <GoalBlueprintEditableBubbleComponent path={`paper_outline.${si}.objective`} text={section.objective} onUpdate={onBubbleUpdate} extraClasses="cursor-pointer  text-[0.9rem] block w-full mb-2 p-3 rounded !text-blue-500 !bg-blue-100" />
                                     <div className="space-y-2">
                                         {flatGoals.map((g, gi) => {
                                             if (g.sectionIdx !== si) return null;
                                             const isActive = editorText.toLowerCase().includes(g.text.toLowerCase());
                                             return (
-                                                <div key={g.path} className={`flex items-center group transition-all duration-200 rounded-md p-1 ${g.type === 'sub' ? 'ml-6' : ''} ${isActive ? 'opacity-100 bg-slate-200/60' : 'opacity-60'}`}>
+                                                <div key={g.path} className={`cursor-pointer flex gap-1 items-center group transition-all duration-200 rounded p-2  hover:bg-slate-200 ${g.type === 'sub' ? 'ml-6' : ''} ${isActive ? 'opacity-100 bg-slate-200/60' : 'opacity-60'}`}>
                                                     <button onClick={() => openDeviation(gi, 'Content')} className="mr-2 text-slate-400 group-hover:text-blue-500" title="Analyze Goal Achievement">●</button>
-                                                    <div className="flex-1"><GoalBlueprintEditableBubbleComponent path={g.path} text={g.text} onUpdate={onBubbleUpdate} extraClasses={`!bg-transparent ${g.type === 'sub' ? 'text-sm text-slate-600' : 'text-base text-slate-800'}`} /></div>
+                                                    <div className="flex-1"><GoalBlueprintEditableBubbleComponent path={g.path} text={g.text} onUpdate={onBubbleUpdate} extraClasses={`!bg-transparent ${g.type === 'sub' ? 'text-[0.8rem] text-slate-600' : 'text-[0.9rem] text-slate-800'}`} /></div>
                                                 </div>
                                             );
                                         })}
@@ -273,7 +273,7 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
                                     <button
                                         key={mode}
                                         onClick={() => setAutoPopupMode(mode)}
-                                        className={`px-3 py-1 text-xs rounded-md ${autoPopupMode === mode ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
+                                        className={`px-3 py-1 cursor-pointer text-xs rounded-md ${autoPopupMode === mode ? 'bg-blue-500 hover:bg-blue-700 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
                                     >
                                         {mode}
                                     </button>
@@ -297,7 +297,7 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
                                             const light = 60 - sc * 25;
                                             const style = { backgroundColor: sc > 0 ? `hsl(${hue}, 70%, ${light}%)` : '#e2e8f0' };
                                             return (
-                                                <div key={`${type}-${i}`} className="w-5 h-5 rounded-md cursor-pointer transition-all" style={style} onMouseEnter={(e) => onEnter(e, i, type)} onMouseLeave={onLeave} onClick={() => openDeviation(i, type)} title={`${type} • ${flatGoals[i]?.text || ''}`} />
+                                                <div key={`${type}-${i}`} className="w-5 h-5 rounded-md cursor-pointer transition-all hover:border-2 hover:border-blue-500" style={style} onMouseEnter={(e) => onEnter(e, i, type)} onMouseLeave={onLeave} onClick={() => openDeviation(i, type)} title={`${type} • ${flatGoals[i]?.text || ''}`} />
                                             );
                                         })}
                                     </div>
