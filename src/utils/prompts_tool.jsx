@@ -9,7 +9,7 @@ export const prompts = {
       `FIRST, internally split [TEXT] into sentences and index them starting at 1. Do not output the split list; only use it to reference sentences.\n` +
       `Use ONLY the standard Natural Language Inference (NLI) labels: "entailment", "contradiction", "neutral".\n` +
       `Output ONLY a JSON object with: score (1-5), statement (one sentence), reason (one-two sentences with sentence_id references), evidence (array of objects with { "sentence_id", "sentence", "relation" }).\n` +
-      `Example: {"score":3,"statement":"Partially aligned.","reason":"Sentence 2 entails the goal but sentence 5 contradicts it.","evidence":[{"sentence_id":2,"sentence":"This study evaluates goal alignment.","relation":"entailment"},{"sentence_id":5,"sentence":"We explicitly reject the goal.","relation":"contradiction"}]}\n` +
+      `Example: {"score":3,"szaitatement":"Partially aligned.","reason":"Sentence 2 entails the goal but sentence 5 contradicts it.","evidence":[{"sentence_id":2,"sentence":"This study evaluates goal alignment.","relation":"entailment"},{"sentence_id":5,"sentence":"We explicitly reject the goal.","relation":"contradiction"}]}\n` +
       `[GOAL]: "{key_point}"\n[TEXT]: "{current_text}"`
     ),
     review_judge:
