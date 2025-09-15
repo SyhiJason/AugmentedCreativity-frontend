@@ -160,10 +160,20 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
 
     const seekAdvice = async (info = modal) => {
         const { keyPointText, type } = info.content;
-        setModal(p => ({ ...p, stage: 'seeking_advice', title: 'Seeking Advice...' }));
-        const problem = type === 'Content' ? 'The text is not well-aligned with its goal.' : 'The text has issues based on peer-review standards.';
-        const sug = await geminiApi.callLLM('suggestion', { current_text: editorText, key_point: keyPointText, problem_description: problem });
-        setModal(p => ({ ...p, stage: 'advice_displayed', title: 'Suggestions', content: { ...p.content, ...sug } }));
+        setModal(p => ({ ...p, stage: 'seeking_advice', title: 'Analyzing Goal Achievement...' }));
+        
+        // 使用新的 goals_action prompt 来先判断目标是否满足
+        const goalAnalysis = await geminiApi.callLLM('goals_action', { 
+            current_text: editorText, 
+            key_point: keyPointText 
+        });
+        
+        setModal(p => ({ 
+            ...p, 
+            stage: 'advice_displayed', 
+            title: 'Goal Analysis & Action', 
+            content: { ...p.content, ...goalAnalysis } 
+        }));
     };
 
     const handleAcceptSuggestion = () => {
@@ -191,17 +201,50 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
                         case 'seeking_advice': return <p>Getting advice from AI...</p>;
                         case 'advice_displayed': return (
                             <div className="space-y-4">
-                                <div className="p-3 bg-yellow-100 border border-yellow-200 rounded-lg">
-                                    <p className="font-semibold text-sm text-yellow-800"><strong>Diagnosis:</strong></p>
-                                    <p className="text-sm text-yellow-900">{content.state_description}</p>
-                                </div>
-                                <div className="p-3 bg-green-100 border border-green-200 rounded-lg">
-                                    <p className="font-semibold text-sm text-green-800"><strong>Suggestion:</strong></p>
-                                    <p className="text-sm text-green-900">{content.suggestion}</p>
-                                </div>
+                                {content.goal_status === 'achieved' ? (
+                                    // 目标已达成的情况
+                                    <>
+                                        <div className="p-3 bg-green-100 border border-green-200 rounded-lg">
+                                            <p className="font-semibold text-sm text-green-800"><strong>✅ Goal Achieved!</strong></p>
+                                            <p className="text-sm text-green-900">{content.summary}</p>
+                                        </div>
+                                        {content.key_evidence && (
+                                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                                <p className="font-semibold text-sm text-blue-800"><strong>Key Evidence:</strong></p>
+                                                <p className="text-sm text-blue-900">{content.key_evidence}</p>
+                                            </div>
+                                        )}
+                                        {content.enhancement_suggestions && (
+                                            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                                <p className="font-semibold text-sm text-yellow-800"><strong>Enhancement Suggestions:</strong></p>
+                                                <p className="text-sm text-yellow-900">{content.enhancement_suggestions}</p>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    // 目标未达成的情况
+                                    <>
+                                        <div className="p-3 bg-orange-100 border border-orange-200 rounded-lg">
+                                            <p className="font-semibold text-sm text-orange-800"><strong>⚠️ Goal Not Yet Achieved</strong></p>
+                                            <p className="text-sm text-orange-900">{content.gap_analysis}</p>
+                                        </div>
+                                        <div className="p-3 bg-blue-100 border border-blue-200 rounded-lg">
+                                            <p className="font-semibold text-sm text-blue-800"><strong>Actionable Guidance:</strong></p>
+                                            <p className="text-sm text-blue-900">{content.actionable_guidance}</p>
+                                        </div>
+                                        {content.example_phrases && (
+                                            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                                                <p className="font-semibold text-sm text-gray-800"><strong>Example Phrases:</strong></p>
+                                                <p className="text-sm text-gray-900">{content.example_phrases}</p>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
                                 <div className="flex justify-end items-center pt-4 mt-2 border-t border-slate-200 gap-x-2">
-                                    <button onClick={() => { setModal({ show: false }); logEvent('advice_rejected'); }} className="px-4 py-2 bg-slate-200 text-slate-800 text-sm font-semibold rounded-lg hover:bg-slate-300">Reject</button>
-                                    <button onClick={handleAcceptSuggestion} className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-500">Accept</button>
+                                    <button onClick={() => { setModal({ show: false }); logEvent('advice_rejected'); }} className="px-4 py-2 bg-slate-200 text-slate-800 text-sm font-semibold rounded-lg hover:bg-slate-300">Close</button>
+                                    {content.goal_status === 'not_achieved' && (
+                                        <button onClick={handleAcceptSuggestion} className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-500">Apply Guidance</button>
+                                    )}
                                 </div>
                             </div>
                         );

@@ -27,6 +27,27 @@ export const prompts = {
         `[KEY POINT CONTEXT]: "{key_point}"\n[TEXT TO REVIEW]: "{current_text}"`
       ),
     summary: `You are a research writing assistant. Analyze the user's text to see if it achieves the stated goal. Be concise and encouraging. Explain how it achieves the goal, or what is missing if it does not. [GOAL]: "{key_point}" [USER TEXT]: "{current_text}" Your response MUST be ONLY a valid JSON object with a single key "summary_text".`,
+    goals_action: `You are an intelligent writing assistant that helps users achieve their writing goals. Your task is to:
+
+1. FIRST, analyze whether the current text adequately addresses the specified goal
+2. THEN, provide appropriate feedback based on your analysis
+
+If the goal IS being met:
+- Provide a "goal_status": "achieved"
+- Give a "summary" explaining HOW the user successfully addressed the goal
+- Highlight the "key_evidence" (specific sentences or phrases that demonstrate goal achievement)
+- Optionally provide "enhancement_suggestions" for further improvement
+
+If the goal is NOT being met:
+- Provide a "goal_status": "not_achieved" 
+- Give a "gap_analysis" explaining what's missing
+- Provide "actionable_guidance" with specific, implementable steps to address the goal
+- Include "example_phrases" or "writing_templates" if helpful
+
+Output ONLY a valid JSON object with these keys: "goal_status", "summary" (if achieved) OR "gap_analysis" (if not achieved), "key_evidence" (if achieved) OR "actionable_guidance" (if not achieved), and optionally "enhancement_suggestions" or "example_phrases".
+
+[GOAL]: "{key_point}"
+[TEXT]: "{current_text}"`,
     suggestion: `You are an expert writing coach. You are given: [GOAL]: "{key_point}", [TEXT]: "{current_text}", [PROBLEM]: "{problem_description}". Generate a "state_description" (why the text is failing) and a "suggestion" (an actionable piece of advice). Your response MUST be ONLY a valid JSON object with two keys: "state_description" and "suggestion".`
   };
   
