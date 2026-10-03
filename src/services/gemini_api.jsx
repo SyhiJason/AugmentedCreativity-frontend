@@ -13,7 +13,9 @@ export default class GeminiApi {
         }
         let finalPrompt = tpl;
         for (const k in replacements) {
-            finalPrompt = finalPrompt.replace(new RegExp(`{${k}}`, 'g'), String(replacements[k]));
+            const value = String(replacements[k]);
+            // function replacer: scientific text often contains `$` sequences that String.replace would interpret
+            finalPrompt = finalPrompt.replace(new RegExp(`{${k}}`, 'g'), () => value);
         }
         try {
             const resultText = await geminiApi.sendMessage(finalPrompt);

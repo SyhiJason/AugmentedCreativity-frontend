@@ -1,36 +1,45 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import splitIntoSentencesTool from "../../utils/split_into_sentences_tool.jsx";
 import {debounce_tool} from "../../utils/debounce_tool.jsx";
 import {doc, setDoc} from "firebase/firestore";
 import {firebaseConfig} from "../../config/default.jsx";
 import GeminiApi from "../../services/gemini_api.jsx";
-import DraggableModalComponent from "../draggable_modal/draggable_modal_component.jsx";
 import HoverCardComponent from "../hover_card/hover_card_component.jsx";
 import GoalBlueprintEditableBubbleComponent from "../goal/goal_blueprint/goal_blueprint_editable_bubble_component.jsx";
 import EditorToolBarComponent from "../editor_tool/editor_tool_bar_component.jsx";
+import FeedbackCardComponent from "../feedback/feedback_card_component.jsx";
+import useTypingSignals from "../feedback/use_typing_signals.jsx";
+import useProactiveFeedback from "../feedback/use_proactive_feedback.jsx";
+import {CONDITIONS, DEFAULT_PARAMS} from "../../utils/calibration_tool.jsx";
+import {locateEvidence, normalizeJudgment, rubricToPrompt} from "../../utils/rubric_tool.jsx";
+
+const LEVEL = {
+    pending: {label: 'Judging…', dot: 'bg-slate-300', chip: 'bg-slate-100 text-slate-500'},
+    none: {label: 'No issue found', dot: 'bg-emerald-400', chip: 'bg-emerald-100 text-emerald-800'},
+    possible: {label: 'Possible issue', dot: 'bg-amber-400', chip: 'bg-amber-100 text-amber-800'},
+    high: {label: 'High-confidence issue', dot: 'bg-red-500', chip: 'bg-red-100 text-red-800'},
+};
+
+const PARAM_FIELDS = [
+    ['B', 'B (benefit)', 0.1], ['C_FP', 'C_FP (false positive)', 0.1], ['C_INT', 'C_INT (interruption)', 0.1],
+    ['gamma', 'γ (deferral discount)', 0.05], ['C_obs', 'C_obs (staleness)', 0.05], ['pLow', 'p floor', 0.05], ['pHigh', 'p high', 0.05],
+];
 
 export default function WritingComponent({ firebase, initialData, logEvent }) {
-    const geminiApi = new GeminiApi();
+    const geminiApi = useMemo(() => new GeminiApi(), []);
     const [goalStructure, setGoalStructure] = useState(initialData.goalStructure);
     const [editorText, setEditorText] = useState(initialData.editorText);
-    const sentences = useMemo(() => splitIntoSentencesTool(editorText), [editorText]);
-    const [analysis, setAnalysis] = useState({ contentScores: [], reviewScores: [], contentLLM: [], reviewLLM: [] });
-    const [modal, setModal] = useState({ show: false, stage: '', title: '', content: {} });
+    const [judgments, setJudgments] = useState(null); // { items: [per-goal judgment], text }
     const [hoverIdx, setHoverIdx] = useState(null);
     const [hoverRect, setHoverRect] = useState(null);
-    const [hoverType, setHoverType] = useState('Content');
-    const [hoverSents, setHoverSents] = useState([]);
+    const [activeCardId, setActiveCardId] = useState(null);
+    const [condition, setCondition] = useState('eu');
+    const [mediumMode, setMediumMode] = useState('hedge');
+    const [params, setParams] = useState(DEFAULT_PARAMS);
+    const [notice, setNotice] = useState('');
     const editorRef = useRef(null);
-    const [sternness, setSternness] = useState(1);
-    const [showHintPopup, setShowHintPopup] = useState(false);
-    const [autoPopupMode, setAutoPopupMode] = useState('Standard');
-    const modificationCount = useRef(0);
-    const inactivityTimer = useRef(null);
-    const triggerSettings = {
-        Standard: { count: 3, delay: 300 },
-        Weak: { count: 7, delay: 500 },
-        None: { count: Infinity, delay: Infinity }
-    };
+    const mirrorRef = useRef(null);
+    const analysisSeq = useRef(0);
+    const typing = useTypingSignals();
 
     const debouncedSave = useMemo(() => debounce_tool(async (data) => {
         if (firebase.db && firebase.userId) {
@@ -43,7 +52,6 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
         debouncedSave({ goalStructure, editorText });
     }, [goalStructure, editorText, debouncedSave]);
 
-
     const flatGoals = useMemo(() => {
         const list = [];
         (goalStructure.paper_outline || []).forEach((sec, si) => {
@@ -55,7 +63,6 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
         });
         return list;
     }, [goalStructure]);
-    const totalGoals = flatGoals.length;
 
     const updateDeep = (obj, path, fn) => {
         const newObj = JSON.parse(JSON.stringify(obj));
@@ -80,190 +87,98 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
         setGoalStructure(newStructure);
     };
 
+    // One structured judgment call per goal: every rubric dimension -> severity, evidence, rationale, action.
     const analyzeText = useCallback(async (text) => {
-        const geminiApi = new GeminiApi();
-
+        const seq = ++analysisSeq.current;
         if (text.trim() === '' || flatGoals.length === 0) {
-            setAnalysis({ contentScores: [], reviewScores: [], contentLLM: [], reviewLLM: [] });
+            setJudgments({ items: [], text });
             return;
         }
+        const venue = goalStructure.metadata?.target_venue || 'unspecified venue';
+        const rubric = rubricToPrompt();
+        const items = Array(flatGoals.length).fill(null);
+        const BATCH_SIZE = 4;
         try {
-            const contentScores = Array(totalGoals).fill(0);
-            const reviewScores = Array(totalGoals).fill(0);
-            const contentLLM = Array(totalGoals).fill(null);
-            const reviewLLM = Array(totalGoals).fill(null);
-            const BATCH_SIZE = 4;
-            for (let i = 0; i < totalGoals; i += BATCH_SIZE) {
-                const batch = flatGoals.slice(i, i + BATCH_SIZE);
-                await Promise.all(batch.map(async (goal, j) => {
-                    const idx = i + j;
-                    const [cj, rj] = await Promise.all([
-                        geminiApi.callLLM('content_judge', { key_point: goal.text, current_text: text }),
-                        geminiApi.callLLM('review_judge', { key_point: goal.text, current_text: text })
-                    ]);
-                    contentScores[idx] = cj?.score ? (cj.score - 1) / 4 : 0;
-                    reviewScores[idx] = rj?.score ? (rj.score - 1) / 4 : 0;
-                    contentLLM[idx] = cj || null;
-                    reviewLLM[idx] = rj || null;
+            for (let i = 0; i < flatGoals.length; i += BATCH_SIZE) {
+                await Promise.all(flatGoals.slice(i, i + BATCH_SIZE).map(async (goal, j) => {
+                    const raw = await geminiApi.callLLM('rubric_judge', { rubric, venue, key_point: goal.text, current_text: text });
+                    items[i + j] = normalizeJudgment(raw);
                 }));
+                if (seq !== analysisSeq.current) return; // a newer analysis superseded this one
             }
-            setAnalysis({ contentScores, reviewScores, contentLLM, reviewLLM });
+            setJudgments({ items, text });
         } catch (e) {
             console.error('analyzeText error:', e);
-            setAnalysis({ contentScores: Array(totalGoals).fill(0), reviewScores: Array(totalGoals).fill(0), contentLLM: [], reviewLLM: [] });
         }
-    }, [flatGoals, totalGoals]);
+    }, [flatGoals, goalStructure.metadata?.target_venue, geminiApi]);
 
-    const debouncedAnalysis = useMemo(() => debounce_tool((text) => analyzeText(text), 500), [analyzeText]);
+    const debouncedAnalysis = useMemo(() => debounce_tool((text) => analyzeText(text), 2000), [analyzeText]);
 
     useEffect(() => {
         debouncedAnalysis(editorText);
     }, [editorText, debouncedAnalysis]);
 
-    const handleHint = useCallback(() => {
-        const firstProblemIdx = analysis.contentScores.findIndex((s, k) => s < 0.5 || analysis.reviewScores[k] < 0.5);
-        if (firstProblemIdx !== -1) {
-            const type = analysis.contentScores[firstProblemIdx] < 0.5 ? 'Content' : 'Review';
-            const goalText = flatGoals[firstProblemIdx].text;
-            const newModal = { show: true, stage: 'deviation_analysis', title: `Action for: "${goalText}"`, content: { keyPointText: goalText, type } };
-            setModal(newModal);
-            seekAdvice(newModal);
-            logEvent('advice_triggered_auto');
-        }
-        setShowHintPopup(false);
-        modificationCount.current = 0;
-    }, [analysis, flatGoals, logEvent]);
+    const fb = useProactiveFeedback({ judgments, flatGoals, editorText, editorRef, typing, condition, mediumMode, params, logEvent });
 
     const handleTextChange = (e) => {
-        const newText = e.target.value;
-        setEditorText(newText);
-        if (autoPopupMode === 'None') return;
-        modificationCount.current++;
-        clearTimeout(inactivityTimer.current);
-        const { count: threshold, delay } = triggerSettings[autoPopupMode];
-        inactivityTimer.current = setTimeout(() => {
-            if (modificationCount.current >= threshold) {
-                const hasProblem = analysis.contentScores.some((s, k) => s < 0.5 || analysis.reviewScores[k] < 0.5);
-                if (hasProblem) {
-                    setShowHintPopup(true);
-                }
-            }
-            modificationCount.current = 0;
-        }, delay);
+        typing.recordEdit(editorText, e.target.value);
+        setEditorText(e.target.value);
     };
 
-    const openDeviation = (i, type) => {
-        const g = flatGoals[i];
-        setModal({ show: true, stage: 'deviation_analysis', title: `Action for: "${g.text}"`, content: { keyPointText: g.text, type } });
-        logEvent('advice_triggered_manual', { goal: g.text, type });
+    // Explicit request for a goal (the ● button / overview row): the author asked, so we answer.
+    const requestGoal = (gi) => {
+        const n = fb.requestGoal(flatGoals[gi].path);
+        setNotice(n ? '' : (judgments?.items[gi] ? `No issue found for “${flatGoals[gi].text}”.` : 'This goal has not been judged yet — write a bit more or wait a moment.'));
+        logEvent('feedback_requested', { goal: flatGoals[gi].text, found: n });
     };
 
-    const seekAdvice = async (info = modal) => {
-        const { keyPointText, type } = info.content;
-        setModal(p => ({ ...p, stage: 'seeking_advice', title: 'Analyzing Goal Achievement...' }));
-        
-        // 使用新的 goals_action prompt 来先判断目标是否满足
-        const goalAnalysis = await geminiApi.callLLM('goals_action', { 
-            current_text: editorText, 
-            key_point: keyPointText 
+    const reviseGoal = (card, newText) => {
+        if (newText && newText !== card.goalText) onBubbleUpdate(card.goalPath, newText);
+        fb.markGoalRevised(card.id);
+    };
+
+    const counterexample = async (card) => {
+        const res = await geminiApi.callLLM('counterexample', {
+            key_point: card.goalText,
+            evidence: card.evidence.map(e => e.sentence).join(' | '),
+            rationale: card.rationale,
+            current_text: editorText,
         });
-        
-        setModal(p => ({ 
-            ...p, 
-            stage: 'advice_displayed', 
-            title: 'Goal Analysis & Action', 
-            content: { ...p.content, ...goalAnalysis } 
+        fb.setCounter(card.id, res);
+    };
+
+    // Editor highlight layer: evidence of visible cards is marked behind the (transparent) textarea.
+    const highlighted = useMemo(() => {
+        const ranges = [];
+        fb.shownCards.forEach(c => c.evidence.forEach(e => {
+            const r = locateEvidence(editorText, e.sentence);
+            if (r) ranges.push({ ...r, active: c.id === activeCardId });
         }));
-    };
+        ranges.sort((a, b) => a.start - b.start);
+        const parts = [];
+        let pos = 0;
+        ranges.forEach(r => {
+            if (r.start < pos) return;
+            parts.push(<span key={`t${pos}`}>{editorText.slice(pos, r.start)}</span>);
+            parts.push(<mark key={`m${r.start}`} className={`rounded-sm text-transparent ${r.active ? 'bg-amber-300/80' : 'bg-yellow-200/70'}`}>{editorText.slice(r.start, r.end)}</mark>);
+            pos = r.end;
+        });
+        parts.push(<span key="tail">{editorText.slice(pos)}{'\n'}</span>);
+        return parts;
+    }, [fb.shownCards, editorText, activeCardId]);
 
-    const handleAcceptSuggestion = () => {
-        const suggestionText = modal.content.suggestion;
-        logEvent('advice_accepted', { suggestion: suggestionText });
-        setModal({ show: false });
-    };
-
-    const onEnter = (e, i, type) => {
+    const onEnter = (e, i) => {
         setHoverIdx(i);
-        setHoverType(type);
         setHoverRect(e.currentTarget.getBoundingClientRect());
-        const kp = flatGoals[i]?.text || '';
-        setHoverSents(sentences.filter(s => kp && s.text.toLowerCase().includes(kp.toLowerCase())));
     };
     const onLeave = () => { setHoverIdx(null); };
 
+    const levelCounts = fb.goalLevels.reduce((acc, l) => ({ ...acc, [l.level]: (acc[l.level] || 0) + 1 }), {});
+    const editorBox = 'absolute inset-0 p-8 text-base leading-7 whitespace-pre-wrap break-words overflow-y-scroll';
+
     return (
         <>
-            <style>{`.slider-thumb::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:16px; height:16px; background:#3b82f6; border-radius:9999px; cursor:pointer; } .slider-thumb::-moz-range-thumb{ width:16px; height:16px; background:#3b82f6; border-radius:9999px; cursor:pointer; }`}</style>
-            <DraggableModalComponent show={modal.show} onClose={() => setModal({ show: false })} title={modal.title}>
-                {(() => {
-                    const { stage, content } = modal;
-                    switch (stage) {
-                        case 'seeking_advice': return <p>Getting advice from AI...</p>;
-                        case 'advice_displayed': return (
-                            <div className="space-y-4">
-                                {content.goal_status === 'achieved' ? (
-                                    // 目标已达成的情况
-                                    <>
-                                        <div className="p-3 bg-green-100 border border-green-200 rounded-lg">
-                                            <p className="font-semibold text-sm text-green-800"><strong>✅ Goal Achieved!</strong></p>
-                                            <p className="text-sm text-green-900">{content.summary}</p>
-                                        </div>
-                                        {content.key_evidence && (
-                                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                                <p className="font-semibold text-sm text-blue-800"><strong>Key Evidence:</strong></p>
-                                                <p className="text-sm text-blue-900">{content.key_evidence}</p>
-                                            </div>
-                                        )}
-                                        {content.enhancement_suggestions && (
-                                            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                                <p className="font-semibold text-sm text-yellow-800"><strong>Enhancement Suggestions:</strong></p>
-                                                <p className="text-sm text-yellow-900">{content.enhancement_suggestions}</p>
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    // 目标未达成的情况
-                                    <>
-                                        <div className="p-3 bg-orange-100 border border-orange-200 rounded-lg">
-                                            <p className="font-semibold text-sm text-orange-800"><strong>⚠️ Goal Not Yet Achieved</strong></p>
-                                            <p className="text-sm text-orange-900">{content.gap_analysis}</p>
-                                        </div>
-                                        <div className="p-3 bg-blue-100 border border-blue-200 rounded-lg">
-                                            <p className="font-semibold text-sm text-blue-800"><strong>Actionable Guidance:</strong></p>
-                                            <p className="text-sm text-blue-900">{content.actionable_guidance}</p>
-                                        </div>
-                                        {content.example_phrases && (
-                                            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                                                <p className="font-semibold text-sm text-gray-800"><strong>Example Phrases:</strong></p>
-                                                <p className="text-sm text-gray-900">{content.example_phrases}</p>
-                                            </div>
-                                        )}
-                                    </>
-                                )}
-                                <div className="flex justify-end items-center pt-4 mt-2 border-t border-slate-200 gap-x-2">
-                                    <button onClick={() => { setModal({ show: false }); logEvent('advice_rejected'); }} className="px-4 py-2 bg-slate-200 text-slate-800 text-sm font-semibold rounded-lg hover:bg-slate-300">Close</button>
-                                    {content.goal_status === 'not_achieved' && (
-                                        <button onClick={handleAcceptSuggestion} className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-500">Apply Guidance</button>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                        default: return <p>Loading...</p>;
-                    }
-                })()}
-            </DraggableModalComponent>
-
-            <DraggableModalComponent show={showHintPopup} onClose={() => setShowHintPopup(false)} title="Writing Suggestion">
-                <div className="space-y-4">
-                    <p>It looks like some of your writing may not be strongly aligned with its goals. Would you like some automated advice?</p>
-                    <div className="flex justify-end items-center pt-4 mt-4 border-t border-slate-200 gap-x-2">
-                        <button onClick={() => setShowHintPopup(false)} className="px-4 py-2 bg-slate-600 text-white text-sm font-semibold rounded-lg hover:bg-slate-500">Dismiss</button>
-                        <button onClick={handleHint} className="px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-500">Get Advice</button>
-                    </div>
-                </div>
-            </DraggableModalComponent>
-
-            <HoverCardComponent visible={hoverIdx !== null} anchorRect={hoverRect} title={`${hoverType} • ${flatGoals[hoverIdx || 0]?.text || ''}`} sentences={hoverSents} llm={hoverIdx !== null ? (hoverType === 'Content' ? analysis.contentLLM[hoverIdx] : analysis.reviewLLM[hoverIdx]) : null} onClose={onLeave} />
+            <HoverCardComponent visible={hoverIdx !== null} anchorRect={hoverRect} title={flatGoals[hoverIdx ?? 0]?.text || ''} item={hoverIdx !== null ? judgments?.items[hoverIdx] : null} onClose={onLeave} />
 
             <div className="flex h-screen w-full bg-white text-slate-700">
                 <div className="w-[25%] h-full flex flex-col bg-slate-50 border-r border-slate-200">
@@ -285,9 +200,10 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
                                         {flatGoals.map((g, gi) => {
                                             if (g.sectionIdx !== si) return null;
                                             const isActive = editorText.toLowerCase().includes(g.text.toLowerCase());
+                                            const lvl = LEVEL[fb.goalLevels[gi]?.level || 'pending'];
                                             return (
                                                 <div key={g.path} className={`cursor-pointer flex gap-1 items-center group transition-all duration-200 rounded p-2  hover:bg-slate-200 ${g.type === 'sub' ? 'ml-6' : ''} ${isActive ? 'opacity-100 bg-slate-200/60' : 'opacity-60'}`}>
-                                                    <button onClick={() => openDeviation(gi, 'Content')} className="mr-2 text-slate-400 group-hover:text-blue-500" title="Analyze Goal Achievement">●</button>
+                                                    <button onClick={() => requestGoal(gi)} className="mr-2 flex items-center" title={`${lvl.label} — click to see feedback for this goal`}><span className={`w-3 h-3 rounded-full ${lvl.dot}`} /></button>
                                                     <div className="flex-1"><GoalBlueprintEditableBubbleComponent path={g.path} text={g.text} onUpdate={onBubbleUpdate} extraClasses={`!bg-transparent ${g.type === 'sub' ? 'text-[0.8rem] text-slate-600' : 'text-[0.9rem] text-slate-800'}`} /></div>
                                                 </div>
                                             );
@@ -298,56 +214,91 @@ export default function WritingComponent({ firebase, initialData, logEvent }) {
                         </div>
                     </div>
                 </div>
+
                 <div className="w-[50%] h-full flex flex-col bg-white">
                     <EditorToolBarComponent editorRef={editorRef} />
-                    <textarea ref={editorRef} value={editorText} onChange={handleTextChange} className="flex-1 p-8 text-base bg-white text-slate-800 leading-7 focus:outline-none resize-none placeholder-slate-400" placeholder="Start writing your paper here..." />
-                </div>
-                <div className="w-[25%] h-full bg-slate-50 flex flex-col items-center justify-start p-4 border-l border-slate-200">
-                    <div className="w-full max-w-xs space-y-6 my-6">
-                        <div className="text-center">
-                            <label className="text-xs font-semibold text-slate-500 block mb-2">Reviewer Sternness</label>
-                            <input type="range" min="0" max="2" step="1" value={sternness} onChange={e => setSternness(Number(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer slider-thumb" />
-                            <span className="text-xs text-slate-500">{['Gentle', 'Standard', 'Harsh'][sternness]}</span>
-                        </div>
-                        <div className="text-center">
-                            <label className="text-xs font-semibold text-slate-500 block mb-2">Auto-Popup Trigger</label>
-                            <div className="flex justify-center gap-x-2">
-                                {Object.keys(triggerSettings).map(mode => (
-                                    <button
-                                        key={mode}
-                                        onClick={() => setAutoPopupMode(mode)}
-                                        className={`px-3 py-1 cursor-pointer text-xs rounded-md ${autoPopupMode === mode ? 'bg-blue-500 hover:bg-blue-700 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
-                                    >
-                                        {mode}
-                                    </button>
-                                ))}
-                            </div>
-                            <span className="text-xs text-slate-500 mt-1 block">
-                                {autoPopupMode !== 'None' ? `${triggerSettings[autoPopupMode].count} mods + ${triggerSettings[autoPopupMode].delay}ms pause` : 'Keyboard trigger disabled'}
-                            </span>
-                        </div>
+                    <div className="relative flex-1">
+                        <div ref={mirrorRef} aria-hidden className={`${editorBox} text-transparent pointer-events-none`} style={{ scrollbarColor: 'transparent transparent' }}>{highlighted}</div>
+                        <textarea ref={editorRef} value={editorText} onChange={handleTextChange}
+                                  onScroll={e => { if (mirrorRef.current) mirrorRef.current.scrollTop = e.target.scrollTop; }}
+                                  className={`${editorBox} bg-transparent text-slate-800 focus:outline-none resize-none placeholder-slate-400`}
+                                  placeholder="Start writing your paper here..." />
                     </div>
-                    <div className="flex-1 flex items-center justify-center">
-                        <div className="flex gap-x-8">
-                            {['Content', 'Review'].map(type => (
-                                <div key={type} className="text-center select-none">
-                                    <div className="mb-2"><p className="text-sm font-semibold text-slate-500">{type}</p></div>
-                                    <div className="flex flex-col items-center gap-y-1.5 relative">
-                                        {Array.from({ length: totalGoals }).map((_, i) => {
-                                            const scores = type === 'Content' ? analysis.contentScores : analysis.reviewScores;
-                                            const sc = scores[i] || 0;
-                                            const hue = type === 'Content' ? 0 : 210;
-                                            const light = 60 - sc * 25;
-                                            const style = { backgroundColor: sc > 0 ? `hsl(${hue}, 70%, ${light}%)` : '#e2e8f0' };
-                                            return (
-                                                <div key={`${type}-${i}`} className="w-5 h-5 rounded-md cursor-pointer transition-all hover:border-2 hover:border-blue-500" style={style} onMouseEnter={(e) => onEnter(e, i, type)} onMouseLeave={onLeave} onClick={() => openDeviation(i, type)} title={`${type} • ${flatGoals[i]?.text || ''}`} />
-                                            );
-                                        })}
-                                    </div>
-                                </div>
+                </div>
+
+                <div className="w-[25%] h-full bg-slate-50 flex flex-col p-4 border-l border-slate-200 overflow-y-auto space-y-5">
+                    <section className="space-y-2">
+                        <h3 className="text-sm font-bold text-slate-800">Intervention policy</h3>
+                        <div className="flex flex-wrap gap-1.5">
+                            {CONDITIONS.map(c => (
+                                <button key={c.id} title={c.hint} onClick={() => { setCondition(c.id); logEvent('condition_changed', { condition: c.id }); }}
+                                        className={`px-2 py-1 text-xs rounded-md cursor-pointer ${condition === c.id ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>{c.label}</button>
                             ))}
                         </div>
-                    </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span>Medium p:</span>
+                            {['hedge', 'silent'].map(m => (
+                                <button key={m} onClick={() => setMediumMode(m)} className={`px-2 py-0.5 rounded cursor-pointer ${mediumMode === m ? 'bg-slate-700 text-white' : 'bg-slate-200 hover:bg-slate-300'}`}>{m === 'hedge' ? 'Present with hedge' : 'Stay silent'}</button>
+                            ))}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                            <div className="flex justify-between"><span>Timing q (now)</span><span>{fb.q.toFixed(2)}</span></div>
+                            <div className="h-1.5 bg-slate-200 rounded"><div className="h-1.5 rounded bg-blue-500 transition-all" style={{ width: `${fb.q * 100}%` }} /></div>
+                            <div className="mt-1">Proactive presentations: {fb.shownCount} / {params.budget}</div>
+                        </div>
+                        <details className="text-xs text-slate-500">
+                            <summary className="cursor-pointer">Policy parameters (Eq. 1)</summary>
+                            <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-2">
+                                {PARAM_FIELDS.map(([k, label, step]) => (
+                                    <label key={k} className="flex flex-col">{label}
+                                        <input type="number" step={step} value={params[k]} onChange={e => setParams(p => ({ ...p, [k]: Number(e.target.value) }))} className="border border-slate-300 rounded px-1 py-0.5 bg-white" />
+                                    </label>
+                                ))}
+                            </div>
+                        </details>
+                    </section>
+
+                    <section className="space-y-2">
+                        <h3 className="text-sm font-bold text-slate-800">Alignment overview</h3>
+                        <div className="flex flex-wrap gap-1 text-[10px]">
+                            {['none', 'possible', 'high'].map(k => <span key={k} className={`px-1.5 py-0.5 rounded ${LEVEL[k].chip}`}>{LEVEL[k].label}: {levelCounts[k] || 0}</span>)}
+                        </div>
+                        <div className="space-y-1">
+                            {flatGoals.map((g, i) => {
+                                const lvl = LEVEL[fb.goalLevels[i]?.level || 'pending'];
+                                return (
+                                    <div key={g.path} onMouseEnter={(e) => onEnter(e, i)} onMouseLeave={onLeave} onClick={() => requestGoal(i)}
+                                         className={`flex items-center gap-2 text-xs cursor-pointer rounded px-1.5 py-1 hover:bg-slate-200 ${g.type === 'sub' ? 'ml-4' : ''}`}>
+                                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${lvl.dot}`} />
+                                        <span className="truncate" title={g.text}>{g.text}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {notice && <div className="text-xs text-slate-500">{notice}</div>}
+                    </section>
+
+                    <section className="space-y-2">
+                        <h3 className="text-sm font-bold text-slate-800">Feedback {fb.shownCards.length > 0 && `(${fb.shownCards.length})`}</h3>
+                        {fb.shownCards.length === 0 && <p className="text-xs text-slate-500">Nothing to flag right now. The assistant only speaks when it is both reasonably sure and the moment suits you.</p>}
+                        {fb.shownCards.map(card => (
+                            <FeedbackCardComponent key={card.id} card={card} params={params} active={card.id === activeCardId} onHover={setActiveCardId}
+                                                   onDismiss={fb.dismiss} onSnooze={fb.snooze} onReviseGoal={reviseGoal} onCounterexample={counterexample} />
+                        ))}
+                    </section>
+
+                    <details className="text-xs text-slate-500">
+                        <summary className="cursor-pointer font-semibold text-slate-700">Why didn't it speak? ({fb.silenceLog.length})</summary>
+                        <ul className="mt-2 space-y-1.5">
+                            {fb.silenceLog.map((s, i) => (
+                                <li key={i} className="p-1.5 rounded bg-white border border-slate-200">
+                                    <span className={`px-1 rounded mr-1 ${s.kind === 'epistemic' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-800'}`}>{s.kind} silence</span>
+                                    {s.dimension} · “{s.goal}”
+                                    <div>p {s.p.toFixed(2)} · q {s.q.toFixed(2)} — {s.reason}</div>
+                                </li>
+                            ))}
+                        </ul>
+                    </details>
                 </div>
             </div>
         </>
