@@ -26,6 +26,32 @@ export const prompts = {
         `Example: {"score":4,"statement":"Strong but with limited comparison.","reason":"Originality in s1; missing baselines in s5.","evidence":[{"sentence_id":1,"sentence":"We introduce a new ...","dimension":"originality"},{"sentence_id":5,"sentence":"We do not compare against ...","dimension":"comparison"}]}\n` +
         `[KEY POINT CONTEXT]: "{key_point}"\n[TEXT TO REVIEW]: "{current_text}"`
       ),
+    rubric_judge:
+      (
+        `You are a structured judge inside a proactive scientific-writing assistant. Judge the [TEXT] against the author's [GOAL] using the two-layer [RUBRIC] below.\n` +
+        `Fixed-layer dimensions are stable across scientific writing; dynamic-layer dimensions depend on the [VENUE] and the author's goal. Judge ONLY what is observable in the text and goal; never judge novelty, impact or style.\n` +
+        `FIRST, internally split [TEXT] into sentences and index them from 1 (do not output the split).\n` +
+        `For EVERY rubric dimension output an object with:\n` +
+        `- "dimension": the dimension id exactly as listed,\n` +
+        `- "severity": integer 0-5 answering "if a problem exists here, how severe is it" (0 = no problem; use the full scale),\n` +
+        `- "problem_type": a short label of the problem (empty string if severity is 0),\n` +
+        `- "evidence": array of { "sentence_id": <int>, "sentence": "<the sentence copied VERBATIM from the text>" } (empty if severity is 0),\n` +
+        `- "rationale": 1-2 sentences explaining how the evidence supports the problem (empty if severity is 0),\n` +
+        `- "suggested_action": "revise_text" | "reinterpret_goal" | "none". Use "reinterpret_goal" when the text may be fine and the goal itself may be too narrow, too broad or outdated.\n` +
+        `Do NOT write replacement text or rewrites. Do NOT output confidence statements about yourself.\n` +
+        `Output ONLY a valid JSON object: {"dimensions":[ ... ]}\n` +
+        `[RUBRIC]:\n{rubric}\n[VENUE]: "{venue}"\n[GOAL]: "{key_point}"\n[TEXT]: "{current_text}"`
+      ),
+    counterexample:
+      (
+        `You are helping an author contest a piece of automated writing feedback. The feedback may be WRONG; your job is to steelman the author's side.\n` +
+        `Given the [GOAL], the [TEXT], the flagged [EVIDENCE] and the system's [RATIONALE], output ONLY a JSON object with:\n` +
+        `- "counterexample": 1-3 sentences describing a plausible reading or situation in which the flagged sentence(s) are acceptable for this goal,\n` +
+        `- "uncertainty_sources": array of 1-3 short strings naming what the judgment depends on that it cannot verify (e.g. missing context, venue convention, unseen citations),\n` +
+        `- "what_would_settle_it": one sentence on what the author could check to decide.\n` +
+        `Do NOT rewrite the author's text.\n` +
+        `[GOAL]: "{key_point}"\n[EVIDENCE]: "{evidence}"\n[RATIONALE]: "{rationale}"\n[TEXT]: "{current_text}"`
+      ),
     summary: `You are a research writing assistant. Analyze the user's text to see if it achieves the stated goal. Be concise and encouraging. Explain how it achieves the goal, or what is missing if it does not. [GOAL]: "{key_point}" [USER TEXT]: "{current_text}" Your response MUST be ONLY a valid JSON object with a single key "summary_text".`,
     goals_action: `You are an intelligent writing assistant that helps users achieve their writing goals. Your task is to:
 
